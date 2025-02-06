@@ -19,7 +19,11 @@ def get_device(index: int):
     return torch.device(f"cuda:{index}" if torch.cuda.is_available() else "cpu")
 
 
-def get_index_of_attack_sample(data, num_pic):
+def get_index_of_attack_sample(data, num_pic, seed: int):
+    np.random.seed(seed)
+    if num_pic > len(data):
+        print("Warning: num_pic is larger than the length of data")
+        return np.random.choice(len(data), num_pic, replace=True)
     return np.random.choice(len(data), num_pic, replace=False)
 
 def get_true_values(alpha: torch.Tensor, use_soft_event: bool):
@@ -54,7 +58,7 @@ def get_onehot_label_batch(cfg: dict, target_label: torch.Tensor):
     return one_hot_label
 
 
-def get_one_target_label(true_label: int, device: torch.device, num_class: int):
+def get_one_target_label(true_label: int, device: torch.device, num_class: int, seed: int):
     """
     Prepare the target label for adversarial attack. It is for initial alpha, you know, target attacks need a target sample to generate the alpha.
 
@@ -69,14 +73,14 @@ def get_one_target_label(true_label: int, device: torch.device, num_class: int):
         torch.Tensor: Target label for the input sample.
     """
     target_label = torch.tensor(
-        get_random_target(num_class, true_label),
+        get_random_target(num_class, true_label, seed),
         dtype=torch.int64,
         device=device,
     )
     return target_label
 
 
-def get_target_label(cfg: dict, true_labels, device: torch.device):
+def get_target_label(cfg: dict, true_labels, device: torch.device, seed: int):
     """
     Get the target labels for the attack.
 
@@ -94,7 +98,7 @@ def get_target_label(cfg: dict, true_labels, device: torch.device):
         _target_labels = []
         for true_label in true_labels:
             target_label = torch.tensor(
-                get_random_target(cfg["dataset"]["num_class"], true_label),
+                get_random_target(cfg["dataset"]["num_class"], true_label, seed),
                 dtype=torch.int64,
                 device=device,
             )
@@ -127,7 +131,7 @@ def pre_process(event, device) -> Tuple[torch.Tensor, torch.Tensor]:
     return indices.unsqueeze(0), values.unsqueeze(0).float()
 
 
-def get_random_target(total_indices: int, true_class: int) -> int:
+def get_random_target(total_indices: int, true_class: int, seed: int) -> int:
     """Generates a pseudorandom targeted label different from the true class.
 
     Args:
@@ -138,6 +142,7 @@ def get_random_target(total_indices: int, true_class: int) -> int:
     Returns:
     - int: A pseudorandom target label that is different from the true class.
     """
+    np.random.seed(seed)
     target = true_class
     while target == true_class:
         target = np.random.randint(0, total_indices)
@@ -178,8 +183,13 @@ def remove_misclassification(cfg: dict, test_data, model, frame_processor, devic
         Tuple containing the number of correctly classified samples, correct events, true labels,
         true values, true indices, and frame list.
     """
+    try:
+        assert cfg["num_pic"] == len(test_data)
+    except:
+        print("Warning: num_pic is not equal to the length of test_data")
+        # cfg["num_pic"] = len(test_data)
     index_of_attack_list = get_index_of_attack_sample(
-        data=test_data, num_pic=cfg["num_pic"]
+        data=test_data, num_pic=cfg["num_pic"], seed=cfg["seed"]
     )
     correct_events = []
     true_labels = []
@@ -353,7 +363,7 @@ def sorted_indices_and_values(indices, values):
 
 
 def get_target_label_for_add_position(
-    add_position_label_mode: str, target_label: torch.Tensor, num_class: int
+    add_position_label_mode: str, target_label: torch.Tensor, num_class: int, seed: int
 ):
     """
     Get the target label for adding a position.
@@ -367,6 +377,7 @@ def get_target_label_for_add_position(
         torch.Tensor: The target label for adding a position.
 
     """
+    torch.manual_seed(seed)
     if add_position_label_mode == "target":
         return target_label
     elif add_position_label_mode == "random_except_target":

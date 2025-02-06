@@ -1,7 +1,7 @@
 defaults:
  - _self_
  - dataset: gesture-dvs
- - model: resnet
+ - model: sew_resnet
  - optimizer: sgd
  - transform: sew_gesture
  - scheduler: StepLR
@@ -17,6 +17,6 @@ report_every: 5
 gpu_idx: 1
 seed: 2020
 project: SNN Attack-Train vgg
-entity: ???
-name: ???
-tags: ???
+entity: x-li
+# name: ???
+# tags: ???

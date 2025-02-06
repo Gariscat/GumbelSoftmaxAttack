@@ -1,5 +1,5 @@
 name: gesture-dvs
-path: data/datasets/gesture-dvs
+path: /home/xinyu.li/event-data/DVSGesture
 batch_size: 16
 num_class: 11
 channels: 2

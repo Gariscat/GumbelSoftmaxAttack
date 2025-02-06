@@ -1,9 +1,10 @@
-from typing import Tuple
+from typing import Tuple, Union, List
 
 import torch
 from spikingjelly.datasets import cifar10_dvs, dvs128_gesture, n_mnist
 from torch.utils.data import DataLoader, Subset, default_collate, random_split
 from torchvision.datasets import VisionDataset
+from lightning.pytorch.utilities import CombinedLoader
 
 from attacks.ours.probability_space.event_generator import (
     GumbelSoftmaxTorch,
@@ -27,13 +28,14 @@ generator_dict = {
 }
 
 
-def get_model(cfg: dict, device: torch.device):
+def get_model(cfg: dict, device: torch.device, attack: bool = False):
     """Loads a pre-trained model based on the provided configuration. Also add hooks to watch the gradient if debug is True.
 
     Args:
     - cfg (dict): A configuration dictionary containing model-related settings.
     - device (torch.device): The device (e.g., CPU or GPU) on which the model should be loaded.
-
+    - attack (bool): Whether the model is used for attack or not (train). Defaults to False.
+    
     Returns:
     - torch.nn.Module: The loaded pre-trained model.
     """
@@ -45,12 +47,21 @@ def get_model(cfg: dict, device: torch.device):
         is_train=False,
         **model_config,
     )
-
-    if model_path is not None:
-        if "pth" in model_path:
-            model.load_state_dict(torch.load(model_path, map_location=device))
+    if attack:
+        if len(cfg['dataset']['frame_number']) == 0:
+            fr_n = cfg["dataset"]["frames_number"][0]
         else:
-            model.load_state_dict(torch.load(model_path, map_location=device)["model"])
+            fr_n = "-".join([str(x) for x in cfg["dataset"]["frame_number"]])
+        dir_name = f"./models/train/{cfg['model']['name']}_{cfg['model']['num_layers']}"
+        model_path = f"{dir_name}/{cfg['dataset']['name']}_frame_{fr_n}_best.pth"
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        print("Successfully loaded the model from", model_path)
+    else:
+        if model_path is not None:
+            if "pth" in model_path:
+                model.load_state_dict(torch.load(model_path, map_location=device))
+            else:
+                model.load_state_dict(torch.load(model_path, map_location=device)["model"])
 
     model = replace_all_batch_norm_modules_(model)
     stop_model_grad_(model)
@@ -66,7 +77,7 @@ def get_model(cfg: dict, device: torch.device):
 def get_dataloaders(
     name: str,
     path: str,
-    frame_number: int,
+    frame_number: Union[int, List[int]],
     batch_size: int,
     data_type: str,
     transform: dict,
@@ -97,68 +108,84 @@ def get_dataloaders(
     """
     train_augment = DataAugment(transform=transform, is_train=True)
     val_augment = DataAugment(transform=transform, is_train=False)
+    
+    train_loaders = []
+    val_loaders = []
+    test_sets = []
+    
+    if isinstance(frame_number, int):
+        frame_number = [frame_number, ]
 
-    # Load dataset
-    if "cifar" in name:
-        data: VisionDataset = datasets_dict[name](
-            root=path,
-            data_type=data_type,
-            frames_number=frame_number,
-            split_by=split_by,
+    for cur_frame_number in frame_number:
+        # Load dataset
+        if "cifar" in name:
+            data: VisionDataset = datasets_dict[name](
+                root=path,
+                data_type=data_type,
+                frames_number=cur_frame_number,
+                split_by=split_by,
+            )
+            train_data, test_data, val_data = random_split(
+                data, [0.8, 0.1, 0.1], torch.Generator().manual_seed(seed)
+            )  # type: ignore
+        elif name in ["gesture-dvs", "nmnist"]:
+            data: VisionDataset = datasets_dict[name](
+                root=path,
+                data_type=data_type,
+                frames_number=cur_frame_number,
+                split_by=split_by,
+                train=True,
+            )
+            test_data: VisionDataset = datasets_dict[name](
+                root=path,
+                data_type=data_type,
+                frames_number=cur_frame_number,
+                split_by=split_by,
+                train=False,
+            )
+            train_data, val_data = random_split(
+                data, [0.9, 0.1], torch.Generator().manual_seed(seed)
+            )
+        else:
+            raise NotImplementedError(f"Dataset {name} not implemented")
+
+        if data_aug:
+            train_data.transform = train_augment  # type: ignore
+            test_data.transform = val_augment  # type: ignore
+            val_data.transform = val_augment  # type: ignore
+
+        # Create DataLoader instances for train, validation, and test data
+        train_loader = DataLoader(
+            dataset=train_data,
+            batch_size=batch_size,
+            pin_memory=True,
+            num_workers=4,
+            shuffle=True,
+            collate_fn=_collate_fn if not binary_frame else _collate_clamp_fn,
+            drop_last=True,
         )
-        train_data, test_data, val_data = random_split(
-            data, [0.8, 0.1, 0.1], torch.Generator().manual_seed(seed)
-        )  # type: ignore
-    elif name in ["gesture-dvs", "nmnist"]:
-        data: VisionDataset = datasets_dict[name](
-            root=path,
-            data_type=data_type,
-            frames_number=frame_number,
-            split_by=split_by,
-            train=True,
+        val_loader = DataLoader(
+            dataset=val_data,
+            batch_size=batch_size,
+            pin_memory=True,
+            num_workers=4,
+            shuffle=False,
+            collate_fn=_collate_fn if not binary_frame else _collate_clamp_fn,
+            drop_last=False,
         )
-        test_data: VisionDataset = datasets_dict[name](
-            root=path,
-            data_type=data_type,
-            frames_number=frame_number,
-            split_by=split_by,
-            train=False,
-        )
-        train_data, val_data = random_split(
-            data, [0.9, 0.1], torch.Generator().manual_seed(seed)
-        )
-    else:
-        raise NotImplementedError(f"Dataset {name} not implemented")
+        # test_loader = DataLoader(
+        #     dataset=test_data, batch_size=pics, pin_memory=True, num_workers=4, shuffle=False, collate_fn=collate_fn)
+        
+        train_loaders.append(train_loader)
+        val_loaders.append(val_loader)
+        # test_set = test_data
+        
+    train_loader = CombinedLoader(train_loaders, mode="sequential")
+    val_loader = CombinedLoader(val_loaders, mode="sequential")
 
-    if data_aug:
-        train_data.transform = train_augment  # type: ignore
-        test_data.transform = val_augment  # type: ignore
-        val_data.transform = val_augment  # type: ignore
-
-    # Create DataLoader instances for train, validation, and test data
-    train_loader = DataLoader(
-        dataset=train_data,
-        batch_size=batch_size,
-        pin_memory=True,
-        num_workers=4,
-        shuffle=True,
-        collate_fn=_collate_fn if not binary_frame else _collate_clamp_fn,
-        drop_last=True,
-    )
-    val_loader = DataLoader(
-        dataset=val_data,
-        batch_size=batch_size,
-        pin_memory=True,
-        num_workers=4,
-        shuffle=False,
-        collate_fn=_collate_fn if not binary_frame else _collate_clamp_fn,
-        drop_last=False,
-    )
-    # test_loader = DataLoader(
-    #     dataset=test_data, batch_size=pics, pin_memory=True, num_workers=4, shuffle=False, collate_fn=collate_fn)
-
-    return train_loader, val_loader, test_data  # type:ignore
-
+    # return train_loader, val_loader, test_data  # type:ignore
+    print("Total number of test data", len(test_data))
+    return train_loader, val_loader, test_data
 
 def _collate_fn(batch):
     batch = default_collate(batch)

@@ -13,7 +13,7 @@ from torch.nn.functional import gumbel_softmax
 from attacks.ours.probability_space.event_generator.gumbel_torch import (
     GumbelSoftmaxTorch,
 )
-from utils.init_alpha import get_alpha
+from utils.init_alpha import get_alpha, init_alpha_from_frame
 
 from .frame_generator import FrameGenerator
 
@@ -25,6 +25,8 @@ class ProbabilityAttacker(nn.Module):
         alpha_dict: dict,
         event_generator: Optional[Callable] = None,
         frame_processor: Optional[Callable] = None,
+        seed: Optional[int] = 0,
+        gpu_idx: Optional[int] = 0,
     ) -> None:
         """
         ProbabilityAttacker class represents an attacker that performs probability-based attacks.
@@ -34,14 +36,19 @@ class ProbabilityAttacker(nn.Module):
             alpha_dict (dict): Dictionary containing alpha values.
             event_generator (Optional[Callable]): Callable object for generating events. Defaults to None.
             frame_processor (Optional[Callable]): Callable object for processing frames. Defaults to None.
+            seed (Optional[int]): Seed for random number generation. Defaults to 0.
         """
         super().__init__()
+        
+        torch.manual_seed(seed)
+        
         self.sample_num = attack_cfg["sample_num"]
         self.lamda = attack_cfg["lamda"]
         self.tau = attack_cfg["max_tau"]
         self.use_soft_event = attack_cfg["use_soft_event"]
 
-        alpha, event_indices = get_alpha(alpha_dict)
+        alpha, event_indices = get_alpha(alpha_dict, seed)
+        
         self.alpha = nn.parameter.Parameter(data=alpha, requires_grad=True)
         self.event_indices = event_indices.unsqueeze(0).repeat_interleave(
             self.sample_num, dim=0
@@ -59,6 +66,9 @@ class ProbabilityAttacker(nn.Module):
 
         self.event_generator = event_generator
         self.frame_processor = frame_processor
+        
+    def get_indices(self):
+        return self.event_indices
 
     def forward(self):
         hard_values, soft_values = self.event_generator(self.alpha)

@@ -10,6 +10,8 @@ from attacks.ours.probability_space.probability_attack import ProbabilityFrameAt
 
 from utils.loss_function import CrossEntropyLoss, L1Loss, MarginLoss, MSELoss
 
+import os
+
 main_loss_dict = {
     "CrossEntropyLoss": CrossEntropyLoss,
     "MarginLoss": MarginLoss,
@@ -115,6 +117,9 @@ class GumbelAttacker(GradientAttackFactory):
             scaler: Scaler object.
             lr_scheduler: Learning rate scheduler object.
         """
+        
+        torch.manual_seed(cfg["seed"])
+        
         super().__init__(
             cfg=cfg,
             model=model,
@@ -149,6 +154,8 @@ class GumbelAttacker(GradientAttackFactory):
         Returns:
             Tuple[dict, dict]: A tuple containing the metrics and results.
         """
+        # with open(f"alpha_gpu_{self.cfg['gpu_idx']}.txt", "a") as f:
+        #     f.write(str(self.probability_attacker.alpha))
         functional.reset_net(self.model)
         if epoch % self.cfg["gradient_accumulation_steps"] == 0:
             self.optimizer_alpha.zero_grad()
@@ -199,6 +206,7 @@ class GumbelAttacker(GradientAttackFactory):
 
                 with torch.no_grad():
                     for param in self.probability_attacker.parameters():
+                        ## print(param.shape)
                         param.clamp_(
                             -self.cfg["attack"]["alpha_boundary"],
                             self.cfg["attack"]["alpha_boundary"],

@@ -24,4 +24,5 @@ init_alpha_mode: target # [default, random_add_indices, target]
 
 add_position_label_mode: target # [random_except_target, target]
 #random_except_target: randomly add position except the target label position , target: use the target label position 
-target_position_ratio: 1.0 # ratio of target position number in the event sequence
+# target_position_ratio: 1.0 # ratio of target position number in the event sequence
+target_position_ratio: 0.1 # ratio of target position number in the event sequence

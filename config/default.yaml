@@ -1,7 +1,7 @@
 defaults:
  - _self_
  - attack: ours
- - dataset: cifar10-dvs
+ - dataset: gesture-dvs
  - model: sew_resnet
  - optimizer: adam
  - transform: sew_gesture
@@ -15,7 +15,7 @@ one_step_samples: ${attack.sample_num}
 max_iteration: 100
 is_save_img: False
 save_path: ./visual/
-num_pic: 20
+num_pic: 500
 
 gpu_idx: 1
 log_print: 10
@@ -34,6 +34,11 @@ use_soft_logits: False # use the logits of soften events or harden events in val
 
 
 project: project_name
-entity: ???
-name: ???
-tags: ???
+
+use_wandb: False
+use_which_frame_number: -1
+ens_mode: vote
+render: False
+#entity: ???
+#name: ???
+#tags: ???

@@ -14,7 +14,8 @@ def remove_repeat_indices(random_indices, origin_indices):
     return filtered_random_indices[0]
 
 
-def _add_indices(origin_indices, init_event_num):
+def _add_indices(origin_indices, init_event_num, seed):
+    np.random.seed(seed)
 
     init_time = np.random.randint(
         low=0,
@@ -44,6 +45,7 @@ def add_indices_values(
     alpha: torch.Tensor,
     device: torch.device,
     add_ratio_events: float,
+    seed: int = 0,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Add additional indices and values to the given tensor.
@@ -60,7 +62,7 @@ def add_indices_values(
     """
     event_num = values.shape[0]
     init_event_num = int(event_num * add_ratio_events)
-    new_indices = _add_indices(indices, init_event_num)
+    new_indices = _add_indices(indices, init_event_num, seed)
 
     add_value = (
         torch.ones(size=(new_indices.shape[1] - event_num, 3), device=device) * 0.05
@@ -72,7 +74,7 @@ def add_indices_values(
 
 
 def init_alpha_from_events(
-    events, device: torch.device, **kwargs
+    events, device: torch.device, seed: int, **kwargs
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Initializes alpha tensor from events dictionary.
@@ -99,7 +101,7 @@ def init_alpha_from_events(
 
 
 def init_alpha_from_frame(
-    frame: torch.Tensor, device: torch.device, **kwargs
+    frame: torch.Tensor, device: torch.device, seed: int, **kwargs
 ) -> torch.Tensor:
     """
     Initializes alpha tensor from binary evetns, alpha would only have 0 or 1 value.
@@ -118,7 +120,7 @@ def init_alpha_from_frame(
 
 
 def init_alpha_random_add_indices(
-    events, device: torch.device, **kwargs
+    events, device: torch.device, seed: int, **kwargs
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Initializes the alpha tensor and indices tensor for the probability attack. randomly add indices and values.
@@ -141,14 +143,14 @@ def init_alpha_random_add_indices(
     alpha = ((values + 1) == mask).float().to(device).T
 
     alpha, indices = add_indices_values(
-        values, np_indices, alpha, device, kwargs["target_position_ratio"]
+        values, np_indices, alpha, device, seed, kwargs["target_position_ratio"]
     )
 
     combine_indices, combine_alpha = sorted_indices_and_values(indices, alpha)
     return combine_alpha, combine_indices
 
 
-def init_alpha_target(events, device, event_dict, target_label, **kwargs):
+def init_alpha_target(events, device, event_dict, target_label, seed: int, **kwargs):
     """
     Initialize the alpha values according to the target sample.
 
@@ -162,13 +164,16 @@ def init_alpha_target(events, device, event_dict, target_label, **kwargs):
         combine_alpha (torch.Tensor): The synthetic alpha values.[num_events, 1]
         combine_indices (torch.Tensor): The synthetic indices.[num_events, 3]
     """
-    orginal_alpha_, orginal_indices = init_alpha_from_events(events, device)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    
+    orginal_alpha_, orginal_indices = init_alpha_from_events(events, device, seed)
     target_events = event_dict.get(target_label.item())
     assert target_events is not None, "target label not found"
     # choose one of the target events
     random_index = np.random.choice(len(target_events))
     target_event = target_events[random_index]
-    target_alpha, target_indices = init_alpha_from_events(target_event, device)
+    target_alpha, target_indices = init_alpha_from_events(target_event, device, seed)
 
     # target_alpha.shape : torch.size([218594, 3])
     # target_indices.shape : torch.size([3, 218594])
@@ -200,7 +205,7 @@ init_alpha_mode_dict = {
 }
 
 
-def get_alpha(parameters: dict):
+def get_alpha(parameters: dict, seed: int = 0):
     """
     Retrieves the alpha value and indices based on the given parameters.
 
@@ -210,10 +215,11 @@ def get_alpha(parameters: dict):
     Returns:
         tuple: A tuple containing the alpha value and indices.
     """
+    torch.manual_seed(seed)
     while True:
         try:
             alpha, indices = init_alpha_mode_dict[parameters["init_alpha_mode"]](
-                **parameters
+                **parameters, seed=seed
             )
         except AssertionError as e:
             print("trying to change the target label...")
@@ -221,6 +227,7 @@ def get_alpha(parameters: dict):
                 parameters["true_label"],
                 parameters["device"],
                 num_class=parameters["num_class"],
+                seed=seed
             )
         else:
             return alpha, indices

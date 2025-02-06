@@ -65,6 +65,8 @@ class TotalMetrics:
         Returns:
         None
         """
+        return
+        
         wandb.log(
             {"global_step": step, f"total_loss/total_loss_{image_id}": self.total_loss}
         )

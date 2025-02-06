@@ -43,12 +43,17 @@ def main(_cfg: DictConfig):
     manual_seed(_cfg["seed"])
     cfg: dict = OmegaConf.to_container(_cfg, resolve=True)  # type:ignore
     # pprint(cfg)
+    cfg["project"] = "GumbelSoftmax-thesis"
+    if isinstance(cfg["dataset"]["frame_number"], str): # multiple latency for one SNN
+        cfg["dataset"]["frame_number"] = list(map(int, cfg["dataset"]["frame_number"].split('-')))
+    else:
+        cfg["dataset"]["frame_number"] = [cfg["dataset"]["frame_number"], ]
     wandb.init(
         project=cfg["project"],
         config=cfg,
-        entity=cfg["entity"],
-        name=cfg["name"],
-        tags=[cfg["tags"]],
+        # entity=cfg["entity"],
+        # name=cfg["name"],
+        # tags=[cfg["tags"]],
     )
     train_data, val_data, _ = get_dataloaders(
         **cfg["dataset"],  # type:ignore
@@ -87,14 +92,14 @@ def train(
 ) -> None:
     optimizer = get_optimizer(params=model.parameters(), **cfg["optimizer"])
     loss_fn = nn.CrossEntropyLoss(label_smoothing=cfg["label_smoothing"])
-    best_acc = 0.6
+    best_acc = 0.1
     lr_scheduler = get_lr_scheduler(optimizer=optimizer, **cfg["scheduler"])
 
     for epoch in range(cfg["epoch"]):
-        train_loss, train_acc = train_one_step(
+        train_loss, train_acc = train_one_epoch(
             model, optimizer, loss_fn, acc_fn, train_loader, device, functional
         )
-        eval_loss, eval_acc = eval_one_step(
+        eval_loss, eval_acc = eval_one_epoch(
             model, loss_fn, acc_fn, val_loader, device, functional
         )
         lr_scheduler.step()
@@ -117,10 +122,15 @@ def train(
             if not Path(dir_name).exists():
                 Path(dir_name).mkdir(parents=True)
 
-            model_name = f"{cfg['dataset']['name']}_{cfg['model']['name']}_{cfg['model']['num_layers']}_{cfg['model']['dnn_act']}"
+            # model_name = f"{cfg['dataset']['name']}_{cfg['model']['name']}_{cfg['model']['num_layers']}_{cfg['model']['dnn_act']}"
+            # torch.save(
+            #     model.state_dict(),
+            #     f"{dir_name}/{model_name}_best_{best_acc}.pth",
+            # )
+            frame_info = '-'.join(map(str, cfg["dataset"]["frame_number"]))
             torch.save(
                 model.state_dict(),
-                f"{dir_name}/{model_name}_best_{best_acc}.pth",
+                f"{dir_name}/{cfg['dataset']['name']}_frame_{frame_info}_best.pth",
             )
             print(f"save best model in {dir_name}/best.pth")
             print(f"best acc: {best_acc}")
@@ -129,7 +139,7 @@ def train(
     wandb.finish()
 
 
-def train_one_step(
+def train_one_epoch(
     model: nn.Module,
     optimizer,
     loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
@@ -142,7 +152,8 @@ def train_one_step(
     total_loss = 0
     total_acc = 0
 
-    for batch_idx, (data, label) in enumerate(data_loader):
+    # for batch_idx, (data, label) in enumerate(data_loader):
+    for (data, label), batch_idx, loader_idx in data_loader:
         functional.reset_net(model)
         data = data.to(device)
         label = label.to(device)
@@ -166,7 +177,7 @@ def train_one_step(
     return total_loss, total_acc
 
 
-def eval_one_step(
+def eval_one_epoch(
     model: torch.nn.Module,
     loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
     acc_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
@@ -179,7 +190,8 @@ def eval_one_step(
         total_loss = 0
         total_acc = 0
 
-        for batch_idx, (data, label) in enumerate(data_loader):
+        # for batch_idx, (data, label) in enumerate(data_loader):
+        for (data, label), batch_idx, loader_idx in data_loader:
             functional.reset_net(model)
             data = data.to(device)
             label = label.to(device)
