@@ -142,7 +142,6 @@ def get_random_target(total_indices: int, true_class: int, seed: int) -> int:
     Returns:
     - int: A pseudorandom target label that is different from the true class.
     """
-    np.random.seed(seed)
     target = true_class
     while target == true_class:
         target = np.random.randint(0, total_indices)
